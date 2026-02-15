@@ -30,6 +30,25 @@ jobs:
       REGISTRY: "registry:5000"
 
     steps:
+      # ── 0. Clean shared /builds dir from any previous run ────────
+      #
+      # The /builds emptyDir persists across workflow runs (same pod).
+      # Stale .done / .apply-done / .kubectl-done files from a previous
+      # run would cause every wait-loop to exit immediately.
+      #
+      - name: Clean builds directory
+        run: |
+          echo "🧹 Cleaning stale signal files from /builds..."
+          rm -f /builds/*.done /builds/*.request /builds/*.processing \
+                /builds/*.apply /builds/*.apply-done /builds/*.apply-log \
+                /builds/*.apply-exitcode /builds/*.kubectl \
+                /builds/*.kubectl-done /builds/*.kubectl-log \
+                /builds/*.kubectl-exitcode /builds/*.exitcode \
+                /builds/*.log /builds/*.dest /builds/*.tar.gz \
+                /builds/*.yaml /builds/*.sh /builds/portfwd-ready \
+                /builds/portfwd-stop
+          echo "✅ /builds is clean"
+
       # ── 1. Checkout ──────────────────────────────────────────────
       - name: Checkout code
         uses: actions/checkout@v4
