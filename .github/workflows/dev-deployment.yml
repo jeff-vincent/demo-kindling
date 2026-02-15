@@ -64,7 +64,8 @@ jobs:
           echo "  • Repository:    ${{ github.repository }}"
           echo "  • Branch:        ${{ github.ref_name }}"
           echo "  • Commit SHA:    ${{ github.sha }}"
-          echo "  • Short SHA:     ${{ github.sha }} (${GITHUB_SHA:0:7})"
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "  • Short SHA:     ${SHORT_SHA}"
           echo ""
           echo "🏷️  Build Tag:"
           echo "  • TAG:           ${{ env.TAG }}"
@@ -338,7 +339,7 @@ jobs:
               kubectl cluster-info --context kind-dev 2>/dev/null || echo "  (cluster-info not available)"
               echo ""
               echo "🔍 Cluster Nodes:"
-              kubectl get nodes --context kind-dev 2>/dev/null || echo "  (nodes info not available)"
+              kubectl get nodes --context kind-dev 2>/dev/null || kubectl get nodes 2>/dev/null || echo "  (nodes info not available)"
             fi
           else
             echo "  • Cluster Name: dev"
@@ -389,7 +390,7 @@ jobs:
           
           if [ "$DEBUG_MODE" = "true" ]; then
             echo "🔍 Verifying images in Kind cluster:"
-            docker exec dev-control-plane crictl images 2>/dev/null | grep -E "(ms-gateway|ms-orders|ms-inventory|ms-ui)" || echo "  (verification unavailable)"
+            docker exec dev-control-plane crictl images 2>/dev/null | grep -E "(ms-gateway|ms-orders|ms-inventory|ms-ui)" || docker exec kind-dev-control-plane crictl images 2>/dev/null | grep -E "(ms-gateway|ms-orders|ms-inventory|ms-ui)" || echo "  (verification unavailable)"
             echo ""
           fi
           
@@ -759,7 +760,7 @@ jobs:
               
               echo ""
               echo "📋 Recent events:"
-              kubectl get events --sort-by='.lastTimestamp' --field-selector involvedObject.name=${{ github.actor }}-${svc} 2>/dev/null | tail -10 || echo "  (no events found)"
+              kubectl get events --sort-by='.lastTimestamp' -l app.kubernetes.io/component=${svc} 2>/dev/null | tail -10 || kubectl get events --sort-by='.lastTimestamp' 2>/dev/null | grep "${{ github.actor }}-${svc}" | tail -10 || echo "  (no events found)"
               
               echo ""
               echo "📋 Pod describe (if exists):"
@@ -1100,12 +1101,12 @@ jobs:
           SERVICES=$(kubectl get svc 2>/dev/null | grep -E "${{ github.actor }}-(gateway|orders|inventory|ui)" | wc -l)
           DEVSTAGING=$(kubectl get devstagingenvironments -l app.kubernetes.io/part-of=microservices-demo --no-headers 2>/dev/null | wc -l)
           
-          echo "  Resource Type          │ Count │ Status"
-          echo "  ───────────────────────┼───────┼─────────────────"
-          echo "  DevStagingEnvironments │ $DEVSTAGING     │ ✓ Created"
-          echo "  Pods (Total)           │ $PODS     │"
-          echo "  Pods (Running)         │ $PODS_RUNNING     │ ✓ Active"
-          echo "  Services               │ $SERVICES     │ ✓ Exposed"
+          echo "  Resource Type          │ Count  │ Status"
+          echo "  ───────────────────────┼────────┼─────────────────"
+          printf "  DevStagingEnvironments │ %-6s │ ✓ Created\n" "$DEVSTAGING"
+          printf "  Pods (Total)           │ %-6s │\n" "$PODS"
+          printf "  Pods (Running)         │ %-6s │ ✓ Active\n" "$PODS_RUNNING"
+          printf "  Services               │ %-6s │ ✓ Exposed\n" "$SERVICES"
           echo ""
           
           echo "────────────────────────────────────────────────────────────────"
