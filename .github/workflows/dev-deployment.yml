@@ -3,10 +3,13 @@
 # Kind cluster via kindling.
 #
 # This workflow runs on your SELF-HOSTED runner (created by the
-# GithubActionRunnerPool CR). It builds four container images (three
-# Go services + a React dashboard) and applies four DevStagingEnvironment
-# CRs — the kindling operator provisions Postgres, MongoDB, and Redis
-# automatically. 
+# GithubActionRunnerPool CR). It uses Kaniko to build four container
+# images (three Go services + a React dashboard) and pushes them to
+# the in-cluster registry at registry:5000. It then applies four
+# DevStagingEnvironment CRs — the kindling operator provisions
+# Postgres, MongoDB, and Redis automatically.
+#
+# No Docker daemon required — Kaniko builds in userspace pods.
 # ─────────────────────────────────────────────────────────────────
 name: Microservices Deploy
 
@@ -24,44 +27,69 @@ jobs:
 
     env:
       TAG: "${{ github.actor }}-${{ github.sha }}"
+      REGISTRY: "registry:5000"
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ── 2. Build all service images ──────────────────────────────
-      - name: Build gateway image
+      # ── 2. Build all service images with Kaniko ──────────────────
+      #
+      # Each step tars up the build context and pipes it into a
+      # one-shot Kaniko executor pod via kubectl. Kaniko builds in
+      # userspace (no Docker daemon) and pushes directly to the
+      # in-cluster registry.
+      #
+      - name: Build & push gateway image
         run: |
-          docker build -t ms-gateway:$TAG gateway/
-          echo "✅ Built ms-gateway:$TAG"
+          kubectl delete pod kaniko-gateway 2>/dev/null || true
+          tar -czf - -C gateway/ . | kubectl run kaniko-gateway \
+            --rm -i --restart=Never \
+            --image=gcr.io/kaniko-project/executor:latest \
+            -- --context=tar://stdin \
+               --destination=$REGISTRY/ms-gateway:$TAG \
+               --insecure \
+               --cache=false
+          echo "✅ Built & pushed ms-gateway:$TAG"
 
-      - name: Build orders image
+      - name: Build & push orders image
         run: |
-          docker build -t ms-orders:$TAG orders/
-          echo "✅ Built ms-orders:$TAG"
+          kubectl delete pod kaniko-orders 2>/dev/null || true
+          tar -czf - -C orders/ . | kubectl run kaniko-orders \
+            --rm -i --restart=Never \
+            --image=gcr.io/kaniko-project/executor:latest \
+            -- --context=tar://stdin \
+               --destination=$REGISTRY/ms-orders:$TAG \
+               --insecure \
+               --cache=false
+          echo "✅ Built & pushed ms-orders:$TAG"
 
-      - name: Build inventory image
+      - name: Build & push inventory image
         run: |
-          docker build -t ms-inventory:$TAG inventory/
-          echo "✅ Built ms-inventory:$TAG"
+          kubectl delete pod kaniko-inventory 2>/dev/null || true
+          tar -czf - -C inventory/ . | kubectl run kaniko-inventory \
+            --rm -i --restart=Never \
+            --image=gcr.io/kaniko-project/executor:latest \
+            -- --context=tar://stdin \
+               --destination=$REGISTRY/ms-inventory:$TAG \
+               --insecure \
+               --cache=false
+          echo "✅ Built & pushed ms-inventory:$TAG"
 
-      - name: Build UI image
+      - name: Build & push UI image
         run: |
-          docker build -t ms-ui:$TAG ui/
-          echo "✅ Built ms-ui:$TAG"
+          kubectl delete pod kaniko-ui 2>/dev/null || true
+          tar -czf - -C ui/ . | kubectl run kaniko-ui \
+            --rm -i --restart=Never \
+            --image=gcr.io/kaniko-project/executor:latest \
+            -- --context=tar://stdin \
+               --destination=$REGISTRY/ms-ui:$TAG \
+               --insecure \
+               --cache=false
+          echo "✅ Built & pushed ms-ui:$TAG"
 
-      # ── 3. Load images into Kind ─────────────────────────────────
-      - name: Load images into Kind
-        run: |
-          if command -v kind &> /dev/null; then
-            kind load docker-image ms-gateway:$TAG --name dev 2>/dev/null || true
-            kind load docker-image ms-orders:$TAG --name dev 2>/dev/null || true
-            kind load docker-image ms-inventory:$TAG --name dev 2>/dev/null || true
-            kind load docker-image ms-ui:$TAG --name dev 2>/dev/null || true
-          fi
-
-      # ── 4. Deploy Orders Service (Postgres + Redis) ──────────────
+      # ── 3. Deploy Orders Service (Postgres + Redis) ──────────────
       - name: Deploy orders service
         run: |
           cat <<EOF | kubectl apply -f -
@@ -75,7 +103,7 @@ jobs:
               apps.example.com/github-username: ${{ github.actor }}
           spec:
             deployment:
-              image: ms-orders:$TAG
+              image: $REGISTRY/ms-orders:$TAG
               replicas: 1
               port: 8081
               healthCheck:
@@ -90,7 +118,7 @@ jobs:
           EOF
           echo "✅ Orders DevStagingEnvironment applied"
 
-      # ── 5. Deploy Inventory Service (MongoDB + shared Redis) ─────
+      # ── 4. Deploy Inventory Service (MongoDB + shared Redis) ─────
       - name: Deploy inventory service
         run: |
           cat <<EOF | kubectl apply -f -
@@ -104,7 +132,7 @@ jobs:
               apps.example.com/github-username: ${{ github.actor }}
           spec:
             deployment:
-              image: ms-inventory:$TAG
+              image: $REGISTRY/ms-inventory:$TAG
               replicas: 1
               port: 8082
               env:
@@ -120,7 +148,7 @@ jobs:
           EOF
           echo "✅ Inventory DevStagingEnvironment applied"
 
-      # ── 6. Deploy Gateway ────────────────────────────────────────
+      # ── 5. Deploy Gateway ────────────────────────────────────────
       - name: Deploy gateway
         run: |
           cat <<EOF | kubectl apply -f -
@@ -134,7 +162,7 @@ jobs:
               apps.example.com/github-username: ${{ github.actor }}
           spec:
             deployment:
-              image: ms-gateway:$TAG
+              image: $REGISTRY/ms-gateway:$TAG
               replicas: 1
               port: 8080
               env:
@@ -150,7 +178,7 @@ jobs:
           EOF
           echo "✅ Gateway DevStagingEnvironment applied"
 
-      # ── 7. Deploy UI Dashboard ──────────────────────────────────
+      # ── 6. Deploy UI Dashboard ──────────────────────────────────
       - name: Deploy UI dashboard
         run: |
           cat <<EOF | kubectl apply -f -
@@ -164,7 +192,7 @@ jobs:
               apps.example.com/github-username: ${{ github.actor }}
           spec:
             deployment:
-              image: ms-ui:$TAG
+              image: $REGISTRY/ms-ui:$TAG
               replicas: 1
               port: 80
               env:
@@ -182,7 +210,7 @@ jobs:
           EOF
           echo "✅ UI DevStagingEnvironment applied"
 
-      # ── 8. Wait for rollouts ─────────────────────────────────────
+      # ── 7. Wait for rollouts ─────────────────────────────────────
       - name: Wait for all deployments
         run: |
           for svc in orders inventory gateway ui; do
