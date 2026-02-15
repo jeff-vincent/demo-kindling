@@ -6,7 +6,7 @@
 # GithubActionRunnerPool CR). It builds four container images (three
 # Go services + a React dashboard) and applies four DevStagingEnvironment
 # CRs — the kindling operator provisions Postgres, MongoDB, and Redis
-# automatically. 
+# automatically.
 # ─────────────────────────────────────────────────────────────────
 name: Microservices Deploy
 
