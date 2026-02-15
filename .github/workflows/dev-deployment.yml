@@ -9,7 +9,7 @@
 # DevStagingEnvironment CRs — the kindling operator provisions
 # Postgres, MongoDB, and Redis automatically.
 #
-# No Docker daemon required — Kaniko builds in userspace pods.
+# No Docker daemon required — Kaniko builds in userspace pods. 
 # ─────────────────────────────────────────────────────────────────
 name: Microservices Deploy
 
