@@ -100,10 +100,11 @@ jobs:
       #
       # Each deploy step writes YAML to /builds/<name>.yaml and touches
       # /builds/<name>.apply — the build-agent sidecar runs kubectl apply.
+      # Using unquoted heredocs so bash expands $REGISTRY, $TAG, etc.
       #
       - name: Deploy orders service
         run: |
-          cat > /builds/orders.yaml <<'YAML'
+          cat > /builds/orders.yaml <<EOF
           apiVersion: apps.example.com/v1alpha1
           kind: DevStagingEnvironment
           metadata:
@@ -126,9 +127,7 @@ jobs:
               - type: postgres
                 version: "16"
               - type: redis
-          YAML
-          # Expand env vars in the YAML
-          envsubst < /builds/orders.yaml > /builds/orders.yaml.tmp && mv /builds/orders.yaml.tmp /builds/orders.yaml
+          EOF
           touch /builds/orders.apply
           while [ ! -f /builds/orders.apply-done ]; do sleep 1; done
           EXIT_CODE=$(cat /builds/orders.apply-exitcode)
@@ -140,7 +139,7 @@ jobs:
       # ── 4. Deploy Inventory Service (MongoDB + shared Redis) ─────
       - name: Deploy inventory service
         run: |
-          cat > /builds/inventory.yaml <<'YAML'
+          cat > /builds/inventory.yaml <<EOF
           apiVersion: apps.example.com/v1alpha1
           kind: DevStagingEnvironment
           metadata:
@@ -164,8 +163,7 @@ jobs:
               type: ClusterIP
             dependencies:
               - type: mongodb
-          YAML
-          envsubst < /builds/inventory.yaml > /builds/inventory.yaml.tmp && mv /builds/inventory.yaml.tmp /builds/inventory.yaml
+          EOF
           touch /builds/inventory.apply
           while [ ! -f /builds/inventory.apply-done ]; do sleep 1; done
           EXIT_CODE=$(cat /builds/inventory.apply-exitcode)
@@ -177,7 +175,7 @@ jobs:
       # ── 5. Deploy Gateway ────────────────────────────────────────
       - name: Deploy gateway
         run: |
-          cat > /builds/gateway-deploy.yaml <<'YAML'
+          cat > /builds/gateway-deploy.yaml <<EOF
           apiVersion: apps.example.com/v1alpha1
           kind: DevStagingEnvironment
           metadata:
@@ -201,8 +199,7 @@ jobs:
             service:
               port: 8080
               type: ClusterIP
-          YAML
-          envsubst < /builds/gateway-deploy.yaml > /builds/gateway-deploy.yaml.tmp && mv /builds/gateway-deploy.yaml.tmp /builds/gateway-deploy.yaml
+          EOF
           touch /builds/gateway-deploy.apply
           while [ ! -f /builds/gateway-deploy.apply-done ]; do sleep 1; done
           EXIT_CODE=$(cat /builds/gateway-deploy.apply-exitcode)
@@ -214,7 +211,7 @@ jobs:
       # ── 6. Deploy UI Dashboard ──────────────────────────────────
       - name: Deploy UI dashboard
         run: |
-          cat > /builds/ui-deploy.yaml <<'YAML'
+          cat > /builds/ui-deploy.yaml <<EOF
           apiVersion: apps.example.com/v1alpha1
           kind: DevStagingEnvironment
           metadata:
@@ -240,8 +237,7 @@ jobs:
               enabled: true
               host: ${{ github.actor }}-ui.localhost
               ingressClassName: nginx
-          YAML
-          envsubst < /builds/ui-deploy.yaml > /builds/ui-deploy.yaml.tmp && mv /builds/ui-deploy.yaml.tmp /builds/ui-deploy.yaml
+          EOF
           touch /builds/ui-deploy.apply
           while [ ! -f /builds/ui-deploy.apply-done ]; do sleep 1; done
           EXIT_CODE=$(cat /builds/ui-deploy.apply-exitcode)
@@ -253,12 +249,12 @@ jobs:
       # ── 7. Wait for rollouts ─────────────────────────────────────
       - name: Wait for all deployments
         run: |
-          cat > /builds/rollout-wait.sh <<'SCRIPT'
+          ACTOR="${{ github.actor }}"
+          cat > /builds/rollout-wait.sh <<SCRIPT
           #!/bin/bash
-          ACTOR="${1}"
           for svc in orders inventory gateway ui; do
-            echo "⏳ Waiting for ${ACTOR}-${svc}..."
-            kubectl rollout status deployment/${ACTOR}-${svc} \
+            echo "⏳ Waiting for ${ACTOR}-\${svc}..."
+            kubectl rollout status deployment/${ACTOR}-\${svc} \
               --timeout=120s || true
           done
 
@@ -275,12 +271,6 @@ jobs:
           kubectl get devstagingenvironments -l app.kubernetes.io/part-of=microservices-demo
           SCRIPT
           chmod +x /builds/rollout-wait.sh
-          # Write the actual script the sidecar will run
-          echo '#!/bin/bash' > /builds/rollout-wait-run.sh
-          echo "bash /builds/rollout-wait.sh ${{ github.actor }}" >> /builds/rollout-wait-run.sh
-          chmod +x /builds/rollout-wait-run.sh
-          # Rename to what the sidecar expects
-          mv /builds/rollout-wait-run.sh /builds/rollout-wait.sh
           touch /builds/rollout-wait.kubectl
           while [ ! -f /builds/rollout-wait.kubectl-done ]; do sleep 2; done
           cat /builds/rollout-wait.kubectl-log
@@ -291,22 +281,17 @@ jobs:
       # ── 8. Smoke test ────────────────────────────────────────────
       - name: Smoke test
         run: |
-          # The smoke test uses curl which IS in the runner container,
-          # but we need the sidecar to set up the port-forward first.
           cat > /builds/smoke-portfwd.sh <<SCRIPT
           #!/bin/bash
           kubectl port-forward svc/${{ github.actor }}-gateway 18080:8080 &
           PF_PID=\$!
           sleep 3
-          # Signal the runner that the port-forward is ready
           touch /builds/portfwd-ready
-          # Keep it alive until the runner signals done
           while [ ! -f /builds/portfwd-stop ]; do sleep 1; done
           kill \$PF_PID 2>/dev/null || true
           SCRIPT
           chmod +x /builds/smoke-portfwd.sh
           touch /builds/smoke-portfwd.kubectl
-          # Wait for port-forward to be ready
           while [ ! -f /builds/portfwd-ready ]; do sleep 1; done
 
           echo "── Gateway health ─────────────────────"
@@ -327,7 +312,6 @@ jobs:
           sleep 2
           curl -sf http://localhost:18080/inventory | jq . || echo "(failed)"
 
-          # Stop the port-forward
           touch /builds/portfwd-stop
           while [ ! -f /builds/smoke-portfwd.kubectl-done ]; do sleep 1; done
 
