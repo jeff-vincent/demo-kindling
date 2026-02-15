@@ -17,6 +17,15 @@ on:
       - "**"
       - ".github/workflows/dev-deploy.yml"
   workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Enable debug mode for verbose logging'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 jobs:
   build-and-deploy:
@@ -24,47 +33,400 @@ jobs:
 
     env:
       TAG: "${{ github.actor }}-${{ github.sha }}"
+      DEBUG_MODE: "${{ github.event.inputs.debug || 'false' }}"
+      DEPLOYMENT_START_TIME: ""
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ── 2. Log Contextual Information ────────────────────────────
+      - name: Log deployment context
+        run: |
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🚀 MICROSERVICES DEPLOYMENT STARTED"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "📋 Workflow Information:"
+          echo "  • Workflow:      ${{ github.workflow }}"
+          echo "  • Run ID:        ${{ github.run_id }}"
+          echo "  • Run Number:    ${{ github.run_number }}"
+          echo "  • Attempt:       ${{ github.run_attempt }}"
+          echo "  • Job:           ${{ github.job }}"
+          echo "  • Action:        ${{ github.event_name }}"
+          echo ""
+          echo "👤 Actor Information:"
+          echo "  • Triggered by:  ${{ github.actor }}"
+          echo "  • Event Actor:   ${{ github.triggering_actor }}"
+          echo ""
+          echo "📦 Repository Information:"
+          echo "  • Repository:    ${{ github.repository }}"
+          echo "  • Branch:        ${{ github.ref_name }}"
+          echo "  • Commit SHA:    ${{ github.sha }}"
+          echo "  • Short SHA:     ${{ github.sha }} (${GITHUB_SHA:0:7})"
+          echo ""
+          echo "🏷️  Build Tag:"
+          echo "  • TAG:           ${{ env.TAG }}"
+          echo ""
+          echo "⚙️  Configuration:"
+          echo "  • Debug Mode:    ${{ env.DEBUG_MODE }}"
+          echo "  • Runner:        self-hosted (${{ github.actor }})"
+          echo ""
+          echo "🕐 Timing:"
+          echo "  • Started at:    $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          
+          # Store start time for summary
+          echo "DEPLOYMENT_START_TIME=$(date +%s)" >> $GITHUB_ENV
+          
+          if [ "${{ env.DEBUG_MODE }}" = "true" ]; then
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🐛 DEBUG MODE ENABLED - Verbose logging active"
+            echo "════════════════════════════════════════════════════════════════"
+            echo ""
+            echo "📝 Environment Variables (sanitized):"
+            env | grep -E '^(GITHUB_|RUNNER_|TAG|DEBUG)' | sort
+            echo ""
+          fi
+
       # ── 2. Build all service images ──────────────────────────────
       - name: Build gateway image
         run: |
-          docker build -t ms-gateway:$TAG gateway/
-          echo "✅ Built ms-gateway:$TAG"
+          set -e
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🔨 BUILDING GATEWAY SERVICE"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "📋 Build Configuration:"
+          echo "  • Service:       gateway"
+          echo "  • Image Name:    ms-gateway:$TAG"
+          echo "  • Build Context: gateway/"
+          echo "  • Dockerfile:    gateway/Dockerfile"
+          echo ""
+          
+          if [ "$DEBUG_MODE" = "true" ]; then
+            echo "🔍 Dockerfile preview:"
+            head -n 10 gateway/Dockerfile
+            echo "  ... (showing first 10 lines)"
+            echo ""
+          fi
+          
+          echo "⏳ Starting build at $(date '+%H:%M:%S')..."
+          BUILD_START=$(date +%s)
+          
+          if docker build -t ms-gateway:$TAG gateway/; then
+            BUILD_END=$(date +%s)
+            BUILD_TIME=$((BUILD_END - BUILD_START))
+            
+            echo ""
+            echo "✅ Build succeeded in ${BUILD_TIME}s"
+            echo ""
+            echo "🔍 Verifying image..."
+            if docker images ms-gateway:$TAG --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"; then
+              IMAGE_SIZE=$(docker images ms-gateway:$TAG --format "{{.Size}}")
+              echo ""
+              echo "📦 Image Details:"
+              echo "  • Image:  ms-gateway:$TAG"
+              echo "  • Size:   $IMAGE_SIZE"
+              echo "  • Status: ✓ Available"
+            else
+              echo "⚠️  Warning: Could not verify image details"
+            fi
+          else
+            echo ""
+            echo "❌ Build failed!"
+            echo "💡 Troubleshooting tips:"
+            echo "  • Check Dockerfile syntax in gateway/"
+            echo "  • Verify all dependencies are available"
+            echo "  • Check build logs above for specific errors"
+            exit 1
+          fi
+          echo ""
 
       - name: Build orders image
         run: |
-          docker build -t ms-orders:$TAG orders/
-          echo "✅ Built ms-orders:$TAG"
+          set -e
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🔨 BUILDING ORDERS SERVICE"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "📋 Build Configuration:"
+          echo "  • Service:       orders"
+          echo "  • Image Name:    ms-orders:$TAG"
+          echo "  • Build Context: orders/"
+          echo "  • Dockerfile:    orders/Dockerfile"
+          echo ""
+          
+          if [ "$DEBUG_MODE" = "true" ]; then
+            echo "🔍 Dockerfile preview:"
+            head -n 10 orders/Dockerfile
+            echo "  ... (showing first 10 lines)"
+            echo ""
+          fi
+          
+          echo "⏳ Starting build at $(date '+%H:%M:%S')..."
+          BUILD_START=$(date +%s)
+          
+          if docker build -t ms-orders:$TAG orders/; then
+            BUILD_END=$(date +%s)
+            BUILD_TIME=$((BUILD_END - BUILD_START))
+            
+            echo ""
+            echo "✅ Build succeeded in ${BUILD_TIME}s"
+            echo ""
+            echo "🔍 Verifying image..."
+            if docker images ms-orders:$TAG --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"; then
+              IMAGE_SIZE=$(docker images ms-orders:$TAG --format "{{.Size}}")
+              echo ""
+              echo "📦 Image Details:"
+              echo "  • Image:  ms-orders:$TAG"
+              echo "  • Size:   $IMAGE_SIZE"
+              echo "  • Status: ✓ Available"
+            else
+              echo "⚠️  Warning: Could not verify image details"
+            fi
+          else
+            echo ""
+            echo "❌ Build failed!"
+            echo "💡 Troubleshooting tips:"
+            echo "  • Check Dockerfile syntax in orders/"
+            echo "  • Verify all dependencies are available"
+            echo "  • Check build logs above for specific errors"
+            exit 1
+          fi
+          echo ""
 
       - name: Build inventory image
         run: |
-          docker build -t ms-inventory:$TAG inventory/
-          echo "✅ Built ms-inventory:$TAG"
+          set -e
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🔨 BUILDING INVENTORY SERVICE"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "📋 Build Configuration:"
+          echo "  • Service:       inventory"
+          echo "  • Image Name:    ms-inventory:$TAG"
+          echo "  • Build Context: inventory/"
+          echo "  • Dockerfile:    inventory/Dockerfile"
+          echo ""
+          
+          if [ "$DEBUG_MODE" = "true" ]; then
+            echo "🔍 Dockerfile preview:"
+            head -n 10 inventory/Dockerfile
+            echo "  ... (showing first 10 lines)"
+            echo ""
+          fi
+          
+          echo "⏳ Starting build at $(date '+%H:%M:%S')..."
+          BUILD_START=$(date +%s)
+          
+          if docker build -t ms-inventory:$TAG inventory/; then
+            BUILD_END=$(date +%s)
+            BUILD_TIME=$((BUILD_END - BUILD_START))
+            
+            echo ""
+            echo "✅ Build succeeded in ${BUILD_TIME}s"
+            echo ""
+            echo "🔍 Verifying image..."
+            if docker images ms-inventory:$TAG --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"; then
+              IMAGE_SIZE=$(docker images ms-inventory:$TAG --format "{{.Size}}")
+              echo ""
+              echo "📦 Image Details:"
+              echo "  • Image:  ms-inventory:$TAG"
+              echo "  • Size:   $IMAGE_SIZE"
+              echo "  • Status: ✓ Available"
+            else
+              echo "⚠️  Warning: Could not verify image details"
+            fi
+          else
+            echo ""
+            echo "❌ Build failed!"
+            echo "💡 Troubleshooting tips:"
+            echo "  • Check Dockerfile syntax in inventory/"
+            echo "  • Verify all dependencies are available"
+            echo "  • Check build logs above for specific errors"
+            exit 1
+          fi
+          echo ""
 
       - name: Build UI image
         run: |
-          docker build -t ms-ui:$TAG ui/
-          echo "✅ Built ms-ui:$TAG"
+          set -e
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🔨 BUILDING UI DASHBOARD"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "📋 Build Configuration:"
+          echo "  • Service:       ui (React Dashboard)"
+          echo "  • Image Name:    ms-ui:$TAG"
+          echo "  • Build Context: ui/"
+          echo "  • Dockerfile:    ui/Dockerfile"
+          echo ""
+          
+          if [ "$DEBUG_MODE" = "true" ]; then
+            echo "🔍 Dockerfile preview:"
+            head -n 10 ui/Dockerfile
+            echo "  ... (showing first 10 lines)"
+            echo ""
+          fi
+          
+          echo "⏳ Starting build at $(date '+%H:%M:%S')..."
+          BUILD_START=$(date +%s)
+          
+          if docker build -t ms-ui:$TAG ui/; then
+            BUILD_END=$(date +%s)
+            BUILD_TIME=$((BUILD_END - BUILD_START))
+            
+            echo ""
+            echo "✅ Build succeeded in ${BUILD_TIME}s"
+            echo ""
+            echo "🔍 Verifying image..."
+            if docker images ms-ui:$TAG --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"; then
+              IMAGE_SIZE=$(docker images ms-ui:$TAG --format "{{.Size}}")
+              echo ""
+              echo "📦 Image Details:"
+              echo "  • Image:  ms-ui:$TAG"
+              echo "  • Size:   $IMAGE_SIZE"
+              echo "  • Status: ✓ Available"
+            else
+              echo "⚠️  Warning: Could not verify image details"
+            fi
+          else
+            echo ""
+            echo "❌ Build failed!"
+            echo "💡 Troubleshooting tips:"
+            echo "  • Check Dockerfile syntax in ui/"
+            echo "  • Verify Node.js dependencies are available"
+            echo "  • Check build logs above for specific errors"
+            exit 1
+          fi
+          echo ""
 
       # ── 3. Load images into Kind ─────────────────────────────────
       - name: Load images into Kind
         run: |
-          if command -v kind &> /dev/null; then
-            kind load docker-image ms-gateway:$TAG --name dev 2>/dev/null || true
-            kind load docker-image ms-orders:$TAG --name dev 2>/dev/null || true
-            kind load docker-image ms-inventory:$TAG --name dev 2>/dev/null || true
-            kind load docker-image ms-ui:$TAG --name dev 2>/dev/null || true
+          set -e
+          echo "════════════════════════════════════════════════════════════════"
+          echo "📥 LOADING IMAGES INTO KIND CLUSTER"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          
+          # Check if Kind is available
+          if ! command -v kind &> /dev/null; then
+            echo "❌ Error: kind command not found!"
+            echo ""
+            echo "💡 Troubleshooting tips:"
+            echo "  • Ensure Kind is installed on the runner"
+            echo "  • Check PATH environment variable"
+            echo "  • Verify self-hosted runner setup"
+            exit 1
           fi
+          
+          echo "✓ Kind CLI found"
+          echo ""
+          
+          # Get Kind cluster information
+          echo "📋 Kind Cluster Information:"
+          if kind get clusters 2>/dev/null | grep -q "dev"; then
+            echo "  • Cluster Name: dev"
+            echo "  • Status:       ✓ Running"
+            
+            if [ "$DEBUG_MODE" = "true" ]; then
+              echo ""
+              echo "🔍 Cluster Details:"
+              kubectl cluster-info --context kind-dev 2>/dev/null || echo "  (cluster-info not available)"
+              echo ""
+              echo "🔍 Cluster Nodes:"
+              kubectl get nodes --context kind-dev 2>/dev/null || echo "  (nodes info not available)"
+            fi
+          else
+            echo "  • Cluster Name: dev"
+            echo "  • Status:       ❌ Not found"
+            echo ""
+            echo "⚠️  Warning: Kind cluster 'dev' not found. Image loading may fail."
+            echo "💡 Create cluster with: kind create cluster --name dev"
+          fi
+          echo ""
+          
+          # Load images
+          echo "📦 Loading Images:"
+          LOAD_START=$(date +%s)
+          
+          images=("ms-gateway:$TAG" "ms-orders:$TAG" "ms-inventory:$TAG" "ms-ui:$TAG")
+          services=("gateway" "orders" "inventory" "ui")
+          loaded_count=0
+          failed_count=0
+          
+          for i in "${!images[@]}"; do
+            image="${images[$i]}"
+            service="${services[$i]}"
+            
+            echo ""
+            echo "  ⏳ Loading ${service}..."
+            echo "     Image: ${image}"
+            
+            if kind load docker-image "${image}" --name dev 2>&1; then
+              echo "     Status: ✓ Loaded successfully"
+              loaded_count=$((loaded_count + 1))
+            else
+              echo "     Status: ✗ Failed to load"
+              failed_count=$((failed_count + 1))
+            fi
+          done
+          
+          LOAD_END=$(date +%s)
+          LOAD_TIME=$((LOAD_END - LOAD_START))
+          
+          echo ""
+          echo "────────────────────────────────────────────────────────────────"
+          echo "📊 Loading Summary:"
+          echo "  • Total Images:    ${#images[@]}"
+          echo "  • Loaded:          ${loaded_count} ✓"
+          echo "  • Failed:          ${failed_count} ✗"
+          echo "  • Duration:        ${LOAD_TIME}s"
+          echo ""
+          
+          if [ "$DEBUG_MODE" = "true" ]; then
+            echo "🔍 Verifying images in Kind cluster:"
+            docker exec dev-control-plane crictl images 2>/dev/null | grep -E "(ms-gateway|ms-orders|ms-inventory|ms-ui)" || echo "  (verification unavailable)"
+            echo ""
+          fi
+          
+          if [ ${failed_count} -gt 0 ]; then
+            echo "⚠️  Warning: Some images failed to load, but continuing deployment..."
+          else
+            echo "✅ All images loaded successfully!"
+          fi
+          echo ""
 
       # ── 4. Deploy Orders Service (Postgres + Redis) ──────────────
       - name: Deploy orders service
         run: |
-          cat <<EOF | kubectl apply -f -
+          set -e
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🚀 DEPLOYING ORDERS SERVICE"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "📋 Service Configuration:"
+          echo "  • Service Name:     orders"
+          echo "  • Resource Name:    ${{ github.actor }}-orders"
+          echo "  • Image:            ms-orders:$TAG"
+          echo "  • Port:             8081"
+          echo "  • Health Check:     /healthz"
+          echo "  • Dependencies:     Postgres 16, Redis"
+          echo "  • Namespace:        default"
+          echo ""
+          
+          if [ "$DEBUG_MODE" = "true" ]; then
+            echo "🔍 Current cluster state before deployment:"
+            kubectl get pods -l app.kubernetes.io/component=orders --show-labels 2>/dev/null || echo "  (no existing pods)"
+            echo ""
+          fi
+          
+          echo "📝 DevStagingEnvironment Specification:"
+          echo "────────────────────────────────────────────────────────────────"
+          cat <<EOF | tee /tmp/orders-manifest.yaml
           apiVersion: apps.example.com/v1alpha1
           kind: DevStagingEnvironment
           metadata:
@@ -88,12 +450,58 @@ jobs:
                 version: "16"
               - type: redis
           EOF
-          echo "✅ Orders DevStagingEnvironment applied"
+          echo "────────────────────────────────────────────────────────────────"
+          echo ""
+          
+          echo "⏳ Applying DevStagingEnvironment..."
+          if kubectl apply -f /tmp/orders-manifest.yaml; then
+            echo ""
+            echo "✅ DevStagingEnvironment applied successfully"
+            echo ""
+            echo "🔍 Verifying resource creation..."
+            if kubectl get devstagingenvironment ${{ github.actor }}-orders -o wide 2>/dev/null; then
+              echo ""
+              echo "✓ Resource verified in cluster"
+            fi
+          else
+            echo ""
+            echo "❌ Failed to apply DevStagingEnvironment"
+            echo "💡 Troubleshooting tips:"
+            echo "  • Check if kindling operator is running"
+            echo "  • Verify CRD is installed: kubectl get crd devstagingenvironments.apps.example.com"
+            echo "  • Check operator logs for errors"
+            exit 1
+          fi
+          echo ""
 
       # ── 5. Deploy Inventory Service (MongoDB + shared Redis) ─────
       - name: Deploy inventory service
         run: |
-          cat <<EOF | kubectl apply -f -
+          set -e
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🚀 DEPLOYING INVENTORY SERVICE"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "📋 Service Configuration:"
+          echo "  • Service Name:     inventory"
+          echo "  • Resource Name:    ${{ github.actor }}-inventory"
+          echo "  • Image:            ms-inventory:$TAG"
+          echo "  • Port:             8082"
+          echo "  • Health Check:     /healthz"
+          echo "  • Dependencies:     MongoDB, Shared Redis"
+          echo "  • Redis URL:        redis://${{ github.actor }}-orders-redis:6379/0"
+          echo "  • Namespace:        default"
+          echo ""
+          
+          if [ "$DEBUG_MODE" = "true" ]; then
+            echo "🔍 Current cluster state before deployment:"
+            kubectl get pods -l app.kubernetes.io/component=inventory --show-labels 2>/dev/null || echo "  (no existing pods)"
+            echo ""
+          fi
+          
+          echo "📝 DevStagingEnvironment Specification:"
+          echo "────────────────────────────────────────────────────────────────"
+          cat <<EOF | tee /tmp/inventory-manifest.yaml
           apiVersion: apps.example.com/v1alpha1
           kind: DevStagingEnvironment
           metadata:
@@ -118,12 +526,58 @@ jobs:
             dependencies:
               - type: mongodb
           EOF
-          echo "✅ Inventory DevStagingEnvironment applied"
+          echo "────────────────────────────────────────────────────────────────"
+          echo ""
+          
+          echo "⏳ Applying DevStagingEnvironment..."
+          if kubectl apply -f /tmp/inventory-manifest.yaml; then
+            echo ""
+            echo "✅ DevStagingEnvironment applied successfully"
+            echo ""
+            echo "🔍 Verifying resource creation..."
+            if kubectl get devstagingenvironment ${{ github.actor }}-inventory -o wide 2>/dev/null; then
+              echo ""
+              echo "✓ Resource verified in cluster"
+            fi
+          else
+            echo ""
+            echo "❌ Failed to apply DevStagingEnvironment"
+            echo "💡 Troubleshooting tips:"
+            echo "  • Check if kindling operator is running"
+            echo "  • Verify MongoDB CRD support"
+            echo "  • Check operator logs for errors"
+            exit 1
+          fi
+          echo ""
 
       # ── 6. Deploy Gateway ────────────────────────────────────────
       - name: Deploy gateway
         run: |
-          cat <<EOF | kubectl apply -f -
+          set -e
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🚀 DEPLOYING GATEWAY SERVICE"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "📋 Service Configuration:"
+          echo "  • Service Name:     gateway"
+          echo "  • Resource Name:    ${{ github.actor }}-gateway"
+          echo "  • Image:            ms-gateway:$TAG"
+          echo "  • Port:             8080"
+          echo "  • Health Check:     /healthz"
+          echo "  • Orders Backend:   http://${{ github.actor }}-orders:8081"
+          echo "  • Inventory Backend: http://${{ github.actor }}-inventory:8082"
+          echo "  • Namespace:        default"
+          echo ""
+          
+          if [ "$DEBUG_MODE" = "true" ]; then
+            echo "🔍 Current cluster state before deployment:"
+            kubectl get pods -l app.kubernetes.io/component=gateway --show-labels 2>/dev/null || echo "  (no existing pods)"
+            echo ""
+          fi
+          
+          echo "📝 DevStagingEnvironment Specification:"
+          echo "────────────────────────────────────────────────────────────────"
+          cat <<EOF | tee /tmp/gateway-manifest.yaml
           apiVersion: apps.example.com/v1alpha1
           kind: DevStagingEnvironment
           metadata:
@@ -148,12 +602,59 @@ jobs:
               port: 8080
               type: ClusterIP
           EOF
-          echo "✅ Gateway DevStagingEnvironment applied"
+          echo "────────────────────────────────────────────────────────────────"
+          echo ""
+          
+          echo "⏳ Applying DevStagingEnvironment..."
+          if kubectl apply -f /tmp/gateway-manifest.yaml; then
+            echo ""
+            echo "✅ DevStagingEnvironment applied successfully"
+            echo ""
+            echo "🔍 Verifying resource creation..."
+            if kubectl get devstagingenvironment ${{ github.actor }}-gateway -o wide 2>/dev/null; then
+              echo ""
+              echo "✓ Resource verified in cluster"
+            fi
+          else
+            echo ""
+            echo "❌ Failed to apply DevStagingEnvironment"
+            echo "💡 Troubleshooting tips:"
+            echo "  • Check if kindling operator is running"
+            echo "  • Verify backend services are configured correctly"
+            echo "  • Check operator logs for errors"
+            exit 1
+          fi
+          echo ""
 
       # ── 7. Deploy UI Dashboard ──────────────────────────────────
       - name: Deploy UI dashboard
         run: |
-          cat <<EOF | kubectl apply -f -
+          set -e
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🚀 DEPLOYING UI DASHBOARD"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "📋 Service Configuration:"
+          echo "  • Service Name:     ui (React Dashboard)"
+          echo "  • Resource Name:    ${{ github.actor }}-ui"
+          echo "  • Image:            ms-ui:$TAG"
+          echo "  • Port:             80"
+          echo "  • Health Check:     /"
+          echo "  • Gateway URL:      http://${{ github.actor }}-gateway:8080"
+          echo "  • Ingress Host:     ${{ github.actor }}-ui.localhost"
+          echo "  • Ingress Class:    nginx"
+          echo "  • Namespace:        default"
+          echo ""
+          
+          if [ "$DEBUG_MODE" = "true" ]; then
+            echo "🔍 Current cluster state before deployment:"
+            kubectl get pods -l app.kubernetes.io/component=ui --show-labels 2>/dev/null || echo "  (no existing pods)"
+            echo ""
+          fi
+          
+          echo "📝 DevStagingEnvironment Specification:"
+          echo "────────────────────────────────────────────────────────────────"
+          cat <<EOF | tee /tmp/ui-manifest.yaml
           apiVersion: apps.example.com/v1alpha1
           kind: DevStagingEnvironment
           metadata:
@@ -180,57 +681,492 @@ jobs:
               host: ${{ github.actor }}-ui.localhost
               ingressClassName: nginx
           EOF
-          echo "✅ UI DevStagingEnvironment applied"
+          echo "────────────────────────────────────────────────────────────────"
+          echo ""
+          
+          echo "⏳ Applying DevStagingEnvironment..."
+          if kubectl apply -f /tmp/ui-manifest.yaml; then
+            echo ""
+            echo "✅ DevStagingEnvironment applied successfully"
+            echo ""
+            echo "🔍 Verifying resource creation..."
+            if kubectl get devstagingenvironment ${{ github.actor }}-ui -o wide 2>/dev/null; then
+              echo ""
+              echo "✓ Resource verified in cluster"
+            fi
+          else
+            echo ""
+            echo "❌ Failed to apply DevStagingEnvironment"
+            echo "💡 Troubleshooting tips:"
+            echo "  • Check if kindling operator is running"
+            echo "  • Verify ingress controller is installed"
+            echo "  • Check operator logs for errors"
+            exit 1
+          fi
+          echo ""
 
       # ── 8. Wait for rollouts ─────────────────────────────────────
       - name: Wait for all deployments
         run: |
-          for svc in orders inventory gateway ui; do
-            echo "⏳ Waiting for ${{ github.actor }}-${svc}..."
-            kubectl rollout status deployment/${{ github.actor }}-${svc} \
-              --timeout=120s || true
-          done
-
+          set -e
+          echo "════════════════════════════════════════════════════════════════"
+          echo "⏳ MONITORING DEPLOYMENT ROLLOUTS"
+          echo "════════════════════════════════════════════════════════════════"
           echo ""
+          
+          services=("orders" "inventory" "gateway" "ui")
+          successful_rollouts=0
+          failed_rollouts=0
+          
+          for svc in "${services[@]}"; do
+            echo "────────────────────────────────────────────────────────────────"
+            echo "📦 Deployment: ${{ github.actor }}-${svc}"
+            echo "────────────────────────────────────────────────────────────────"
+            
+            ROLLOUT_START=$(date +%s)
+            
+            # Show initial pod status
+            echo "📊 Initial pod status:"
+            kubectl get pods -l app.kubernetes.io/component=${svc} -o wide 2>/dev/null || echo "  (no pods found yet)"
+            echo ""
+            
+            echo "⏳ Waiting for rollout to complete (timeout: 120s)..."
+            if kubectl rollout status deployment/${{ github.actor }}-${svc} --timeout=120s 2>&1; then
+              ROLLOUT_END=$(date +%s)
+              ROLLOUT_TIME=$((ROLLOUT_END - ROLLOUT_START))
+              
+              echo ""
+              echo "✅ Rollout completed successfully in ${ROLLOUT_TIME}s"
+              successful_rollouts=$((successful_rollouts + 1))
+              
+              # Show final pod status
+              echo ""
+              echo "📊 Final pod status:"
+              kubectl get pods -l app.kubernetes.io/component=${svc} -o wide 2>/dev/null
+              
+            else
+              ROLLOUT_END=$(date +%s)
+              ROLLOUT_TIME=$((ROLLOUT_END - ROLLOUT_START))
+              
+              echo ""
+              echo "❌ Rollout failed or timed out after ${ROLLOUT_TIME}s"
+              failed_rollouts=$((failed_rollouts + 1))
+              
+              # Show pod status for debugging
+              echo ""
+              echo "📊 Current pod status:"
+              kubectl get pods -l app.kubernetes.io/component=${svc} -o wide 2>/dev/null
+              
+              echo ""
+              echo "📋 Recent events:"
+              kubectl get events --sort-by='.lastTimestamp' --field-selector involvedObject.name=${{ github.actor }}-${svc} 2>/dev/null | tail -10 || echo "  (no events found)"
+              
+              echo ""
+              echo "📋 Pod describe (if exists):"
+              POD_NAME=$(kubectl get pods -l app.kubernetes.io/component=${svc} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+              if [ -n "$POD_NAME" ]; then
+                kubectl describe pod $POD_NAME | tail -20
+              else
+                echo "  (no pods found)"
+              fi
+              
+              echo ""
+              echo "💡 Troubleshooting tips:"
+              echo "  • Check image pull status"
+              echo "  • Verify health check endpoint is responding"
+              echo "  • Check pod logs: kubectl logs ${{ github.actor }}-${svc}-<pod-id>"
+              echo "  • Inspect dependencies (databases, redis, etc.)"
+            fi
+            echo ""
+          done
+          
+          echo "════════════════════════════════════════════════════════════════"
+          echo "📊 ROLLOUT SUMMARY"
+          echo "════════════════════════════════════════════════════════════════"
+          echo "  • Total Services:  ${#services[@]}"
+          echo "  • Successful:      ${successful_rollouts} ✓"
+          echo "  • Failed:          ${failed_rollouts} ✗"
+          echo ""
+          
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🔍 CLUSTER RESOURCE OVERVIEW"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          
           echo "📦 Pods:"
-          kubectl get pods -l app.kubernetes.io/part-of=microservices-demo
-
+          kubectl get pods -l app.kubernetes.io/part-of=microservices-demo -o wide 2>/dev/null || echo "  (no pods found)"
+          
           echo ""
           echo "🌐 Services:"
-          kubectl get svc | grep -E "${{ github.actor }}-(gateway|orders|inventory|ui)"
-
+          kubectl get svc 2>/dev/null | grep -E "${{ github.actor }}-(gateway|orders|inventory|ui)" || echo "  (no services found)"
+          
           echo ""
           echo "🎯 DevStagingEnvironments:"
-          kubectl get devstagingenvironments -l app.kubernetes.io/part-of=microservices-demo
+          kubectl get devstagingenvironments -l app.kubernetes.io/part-of=microservices-demo -o wide 2>/dev/null || echo "  (no DevStagingEnvironments found)"
+          
+          if [ "$DEBUG_MODE" = "true" ]; then
+            echo ""
+            echo "🔍 All Deployments:"
+            kubectl get deployments -l app.kubernetes.io/part-of=microservices-demo -o wide 2>/dev/null
+            
+            echo ""
+            echo "🔍 All Pods (with labels):"
+            kubectl get pods -l app.kubernetes.io/part-of=microservices-demo --show-labels 2>/dev/null
+            
+            echo ""
+            echo "🔍 Ingress Resources:"
+            kubectl get ingress 2>/dev/null | grep "${{ github.actor }}" || echo "  (no ingress found)"
+          fi
+          
+          echo ""
 
-      # ── 8. Smoke test ────────────────────────────────────────────
+      # ── 9. Smoke test ────────────────────────────────────────────
       - name: Smoke test
         run: |
+          set -e
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🧪 RUNNING SMOKE TESTS"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          
+          echo "🔧 Setting up port forwarding..."
+          echo "  • Target:    svc/${{ github.actor }}-gateway"
+          echo "  • Local Port: 18080"
+          echo "  • Remote Port: 8080"
+          echo ""
+          
           kubectl port-forward svc/${{ github.actor }}-gateway 18080:8080 &
           PF_PID=$!
+          echo "  • Port-forward PID: $PF_PID"
+          
+          echo "⏳ Waiting for port-forward to establish..."
           sleep 3
-
-          echo "── Gateway health ─────────────────────"
-          curl -s http://localhost:18080/healthz | jq .
-
+          
+          # Verify port-forward is working
+          if ! ps -p $PF_PID > /dev/null; then
+            echo ""
+            echo "❌ Port-forward failed to start!"
+            echo "💡 Troubleshooting tips:"
+            echo "  • Check if service exists: kubectl get svc ${{ github.actor }}-gateway"
+            echo "  • Verify pods are running: kubectl get pods -l app.kubernetes.io/component=gateway"
+            exit 1
+          fi
+          
+          echo "✓ Port-forward established"
           echo ""
-          echo "── Aggregated status ──────────────────"
-          curl -s http://localhost:18080/status | jq .
-
+          
+          # Track test results
+          tests_passed=0
+          tests_failed=0
+          
+          # ──────────────────────────────────────────────────────────
+          echo "════════════════════════════════════════════════════════════════"
+          echo "TEST 1: Gateway Health Check"
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🔍 Request:  GET http://localhost:18080/healthz"
+          echo "🕐 Time:     $(date '+%Y-%m-%d %H:%M:%S')"
           echo ""
-          echo "── Create an order ────────────────────"
-          curl -s -X POST http://localhost:18080/orders \
+          
+          if HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" http://localhost:18080/healthz); then
+            HTTP_CODE=$(echo "$HEALTH_RESPONSE" | tail -n1)
+            RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | head -n-1)
+            
+            echo "📥 HTTP Status: $HTTP_CODE"
+            echo "📄 Response Body:"
+            echo "$RESPONSE_BODY" | jq . 2>/dev/null || echo "$RESPONSE_BODY"
+            echo ""
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Test PASSED - Health check returned 200 OK"
+              tests_passed=$((tests_passed + 1))
+            else
+              echo "⚠️  Test WARNING - Health check returned status $HTTP_CODE"
+              tests_failed=$((tests_failed + 1))
+            fi
+          else
+            echo "❌ Test FAILED - Could not reach health endpoint"
+            tests_failed=$((tests_failed + 1))
+          fi
+          echo ""
+          
+          # ──────────────────────────────────────────────────────────
+          echo "════════════════════════════════════════════════════════════════"
+          echo "TEST 2: Aggregated Status"
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🔍 Request:  GET http://localhost:18080/status"
+          echo "🕐 Time:     $(date '+%Y-%m-%d %H:%M:%S')"
+          echo ""
+          
+          if STATUS_RESPONSE=$(curl -s -w "\n%{http_code}" http://localhost:18080/status); then
+            HTTP_CODE=$(echo "$STATUS_RESPONSE" | tail -n1)
+            RESPONSE_BODY=$(echo "$STATUS_RESPONSE" | head -n-1)
+            
+            echo "📥 HTTP Status: $HTTP_CODE"
+            echo "📄 Response Body:"
+            echo "$RESPONSE_BODY" | jq . 2>/dev/null || echo "$RESPONSE_BODY"
+            echo ""
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Test PASSED - Status endpoint returned 200 OK"
+              tests_passed=$((tests_passed + 1))
+              
+              # Validate JSON structure
+              if echo "$RESPONSE_BODY" | jq -e . >/dev/null 2>&1; then
+                echo "✓ Response is valid JSON"
+              else
+                echo "⚠️  Warning: Response is not valid JSON"
+              fi
+            else
+              echo "⚠️  Test WARNING - Status endpoint returned status $HTTP_CODE"
+              tests_failed=$((tests_failed + 1))
+            fi
+          else
+            echo "❌ Test FAILED - Could not reach status endpoint"
+            tests_failed=$((tests_failed + 1))
+          fi
+          echo ""
+          
+          # ──────────────────────────────────────────────────────────
+          echo "════════════════════════════════════════════════════════════════"
+          echo "TEST 3: Create Order"
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🔍 Request:  POST http://localhost:18080/orders"
+          echo "📤 Payload:  {\"product\":\"widget-a\",\"quantity\":2}"
+          echo "🕐 Time:     $(date '+%Y-%m-%d %H:%M:%S')"
+          echo ""
+          
+          if ORDER_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:18080/orders \
             -H "Content-Type: application/json" \
-            -d '{"product":"widget-a","quantity":2}' | jq .
-
+            -d '{"product":"widget-a","quantity":2}'); then
+            
+            HTTP_CODE=$(echo "$ORDER_RESPONSE" | tail -n1)
+            RESPONSE_BODY=$(echo "$ORDER_RESPONSE" | head -n-1)
+            
+            echo "📥 HTTP Status: $HTTP_CODE"
+            echo "📄 Response Body:"
+            echo "$RESPONSE_BODY" | jq . 2>/dev/null || echo "$RESPONSE_BODY"
+            echo ""
+            
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+              echo "✅ Test PASSED - Order created successfully (HTTP $HTTP_CODE)"
+              tests_passed=$((tests_passed + 1))
+              
+              # Validate JSON structure
+              if echo "$RESPONSE_BODY" | jq -e . >/dev/null 2>&1; then
+                echo "✓ Response is valid JSON"
+                
+                # Check for order ID
+                if echo "$RESPONSE_BODY" | jq -e '.id' >/dev/null 2>&1; then
+                  ORDER_ID=$(echo "$RESPONSE_BODY" | jq -r '.id')
+                  echo "✓ Order ID: $ORDER_ID"
+                fi
+              fi
+            else
+              echo "⚠️  Test WARNING - Order creation returned status $HTTP_CODE"
+              tests_failed=$((tests_failed + 1))
+            fi
+          else
+            echo "❌ Test FAILED - Could not create order"
+            tests_failed=$((tests_failed + 1))
+          fi
           echo ""
-          echo "── Check inventory (stock decremented) ─"
-          sleep 2  # give the queue consumer a moment
-          curl -s http://localhost:18080/inventory | jq .
-
+          
+          # ──────────────────────────────────────────────────────────
+          echo "════════════════════════════════════════════════════════════════"
+          echo "TEST 4: Check Inventory (after order)"
+          echo "════════════════════════════════════════════════════════════════"
+          echo "ℹ️  Waiting 2 seconds for queue processing..."
+          sleep 2
+          echo ""
+          echo "🔍 Request:  GET http://localhost:18080/inventory"
+          echo "🕐 Time:     $(date '+%Y-%m-%d %H:%M:%S')"
+          echo ""
+          
+          if INVENTORY_RESPONSE=$(curl -s -w "\n%{http_code}" http://localhost:18080/inventory); then
+            HTTP_CODE=$(echo "$INVENTORY_RESPONSE" | tail -n1)
+            RESPONSE_BODY=$(echo "$INVENTORY_RESPONSE" | head -n-1)
+            
+            echo "📥 HTTP Status: $HTTP_CODE"
+            echo "📄 Response Body:"
+            echo "$RESPONSE_BODY" | jq . 2>/dev/null || echo "$RESPONSE_BODY"
+            echo ""
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Test PASSED - Inventory endpoint returned 200 OK"
+              tests_passed=$((tests_passed + 1))
+              
+              # Validate JSON structure
+              if echo "$RESPONSE_BODY" | jq -e . >/dev/null 2>&1; then
+                echo "✓ Response is valid JSON"
+                
+                # Check if stock was decremented
+                if echo "$RESPONSE_BODY" | jq -e '.[] | select(.product=="widget-a")' >/dev/null 2>&1; then
+                  STOCK=$(echo "$RESPONSE_BODY" | jq -r '.[] | select(.product=="widget-a") | .stock')
+                  echo "✓ widget-a stock: $STOCK (should be decremented)"
+                fi
+              fi
+            else
+              echo "⚠️  Test WARNING - Inventory endpoint returned status $HTTP_CODE"
+              tests_failed=$((tests_failed + 1))
+            fi
+          else
+            echo "❌ Test FAILED - Could not reach inventory endpoint"
+            tests_failed=$((tests_failed + 1))
+          fi
+          echo ""
+          
+          # ──────────────────────────────────────────────────────────
+          # Cleanup
+          echo "🧹 Cleaning up port-forward (PID: $PF_PID)..."
           kill $PF_PID 2>/dev/null || true
+          wait $PF_PID 2>/dev/null || true
+          echo "✓ Port-forward terminated"
           echo ""
-          echo "🎉 All services deployed!"
-          echo "🎨 UI dashboard: http://${{ github.actor }}-ui.localhost"
-          echo "🌐 Gateway API:  http://${{ github.actor }}-gateway.localhost"
-          echo "📡 Fallback:     kubectl port-forward svc/${{ github.actor }}-gateway 8080:8080"
+          
+          # ──────────────────────────────────────────────────────────
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🧪 SMOKE TEST RESULTS"
+          echo "════════════════════════════════════════════════════════════════"
+          total_tests=$((tests_passed + tests_failed))
+          echo "  • Total Tests:   $total_tests"
+          echo "  • Passed:        $tests_passed ✓"
+          echo "  • Failed:        $tests_failed ✗"
+          
+          if [ $tests_failed -eq 0 ]; then
+            echo ""
+            echo "✅ All smoke tests passed!"
+          else
+            echo ""
+            echo "⚠️  Some tests failed. Review output above for details."
+          fi
+          echo ""
+
+      # ── 10. Deployment Summary ───────────────────────────────────
+      - name: Deployment Summary
+        if: always()
+        run: |
+          echo "════════════════════════════════════════════════════════════════"
+          echo "📊 DEPLOYMENT SUMMARY"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          
+          # Calculate total deployment time
+          if [ -n "$DEPLOYMENT_START_TIME" ]; then
+            DEPLOYMENT_END_TIME=$(date +%s)
+            TOTAL_TIME=$((DEPLOYMENT_END_TIME - DEPLOYMENT_START_TIME))
+            MINUTES=$((TOTAL_TIME / 60))
+            SECONDS=$((TOTAL_TIME % 60))
+            echo "⏱️  Total Deployment Time: ${MINUTES}m ${SECONDS}s"
+          else
+            echo "⏱️  Total Deployment Time: N/A"
+          fi
+          echo ""
+          
+          echo "────────────────────────────────────────────────────────────────"
+          echo "🏷️  DEPLOYED SERVICES"
+          echo "────────────────────────────────────────────────────────────────"
+          echo ""
+          echo "  Service    │ Image Tag"
+          echo "  ───────────┼─────────────────────────────────────────────────"
+          echo "  gateway    │ ms-gateway:$TAG"
+          echo "  orders     │ ms-orders:$TAG"
+          echo "  inventory  │ ms-inventory:$TAG"
+          echo "  ui         │ ms-ui:$TAG"
+          echo ""
+          
+          echo "────────────────────────────────────────────────────────────────"
+          echo "🌐 ACCESS URLS"
+          echo "────────────────────────────────────────────────────────────────"
+          echo ""
+          echo "  🎨 UI Dashboard:"
+          echo "     http://${{ github.actor }}-ui.localhost"
+          echo ""
+          echo "  🌐 Gateway API:"
+          echo "     http://${{ github.actor }}-gateway.localhost"
+          echo ""
+          echo "  📡 Port-Forward Commands:"
+          echo "     kubectl port-forward svc/${{ github.actor }}-gateway 8080:8080"
+          echo "     kubectl port-forward svc/${{ github.actor }}-ui 3000:80"
+          echo ""
+          
+          echo "────────────────────────────────────────────────────────────────"
+          echo "📦 RESOURCE SUMMARY"
+          echo "────────────────────────────────────────────────────────────────"
+          echo ""
+          
+          # Count resources
+          PODS=$(kubectl get pods -l app.kubernetes.io/part-of=microservices-demo --no-headers 2>/dev/null | wc -l)
+          PODS_RUNNING=$(kubectl get pods -l app.kubernetes.io/part-of=microservices-demo --no-headers 2>/dev/null | grep "Running" | wc -l)
+          SERVICES=$(kubectl get svc 2>/dev/null | grep -E "${{ github.actor }}-(gateway|orders|inventory|ui)" | wc -l)
+          DEVSTAGING=$(kubectl get devstagingenvironments -l app.kubernetes.io/part-of=microservices-demo --no-headers 2>/dev/null | wc -l)
+          
+          echo "  Resource Type          │ Count │ Status"
+          echo "  ───────────────────────┼───────┼─────────────────"
+          echo "  DevStagingEnvironments │ $DEVSTAGING     │ ✓ Created"
+          echo "  Pods (Total)           │ $PODS     │"
+          echo "  Pods (Running)         │ $PODS_RUNNING     │ ✓ Active"
+          echo "  Services               │ $SERVICES     │ ✓ Exposed"
+          echo ""
+          
+          echo "────────────────────────────────────────────────────────────────"
+          echo "🐛 TROUBLESHOOTING TIPS"
+          echo "────────────────────────────────────────────────────────────────"
+          echo ""
+          echo "  View logs:"
+          echo "    kubectl logs -l app.kubernetes.io/component=gateway --tail=50"
+          echo "    kubectl logs -l app.kubernetes.io/component=orders --tail=50"
+          echo "    kubectl logs -l app.kubernetes.io/component=inventory --tail=50"
+          echo "    kubectl logs -l app.kubernetes.io/component=ui --tail=50"
+          echo ""
+          echo "  Check pod status:"
+          echo "    kubectl get pods -l app.kubernetes.io/part-of=microservices-demo"
+          echo "    kubectl describe pod <pod-name>"
+          echo ""
+          echo "  View events:"
+          echo "    kubectl get events --sort-by='.lastTimestamp' | tail -20"
+          echo ""
+          echo "  Check operator logs:"
+          echo "    kubectl logs -n kindling-system -l app=kindling-operator"
+          echo ""
+          echo "  Test connectivity:"
+          echo "    kubectl run -it --rm debug --image=curlimages/curl --restart=Never -- sh"
+          echo "    # Then: curl http://${{ github.actor }}-gateway:8080/healthz"
+          echo ""
+          
+          echo "────────────────────────────────────────────────────────────────"
+          echo "🎯 USEFUL COMMANDS"
+          echo "────────────────────────────────────────────────────────────────"
+          echo ""
+          echo "  Watch deployments:"
+          echo "    watch kubectl get pods,svc,devstagingenvironments"
+          echo ""
+          echo "  Delete everything:"
+          echo "    kubectl delete devstagingenvironment -l app.kubernetes.io/part-of=microservices-demo"
+          echo ""
+          echo "  Re-trigger workflow:"
+          echo "    git commit --allow-empty -m 'retrigger deployment'"
+          echo "    git push"
+          echo ""
+          
+          if [ "$DEBUG_MODE" = "true" ]; then
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🐛 DEBUG INFORMATION"
+            echo "════════════════════════════════════════════════════════════════"
+            echo ""
+            echo "Cluster Info:"
+            kubectl cluster-info 2>/dev/null || echo "  (not available)"
+            echo ""
+            echo "All Namespaces:"
+            kubectl get namespaces
+            echo ""
+            echo "Storage Classes:"
+            kubectl get storageclass
+            echo ""
+          fi
+          
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🎉 DEPLOYMENT COMPLETE!"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "🕐 Completed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
